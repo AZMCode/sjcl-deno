@@ -1,0 +1,7 @@
+{
+    "scripts": {
+        "test":  "deno test ./test",
+        "jsdoc": "deno doc --json",
+        "lint":  "deno lint --unstable"
+    }
+}
