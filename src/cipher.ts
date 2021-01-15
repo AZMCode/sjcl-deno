@@ -1,2 +1,1 @@
-import aes from "./aes.ts";
-export {aes};
+import { default as aes } from "./aes.ts";

@@ -6,43 +6,126 @@
  * @author Quinn Slack
  */
 
-import { Invalid, Bug } from "./exception.ts";
-import * as codec from "./codec.ts"
-import * as bitArray from "./bitArray.ts"
-/**
- * Context for a SHA-1 operation in progress.
- * @constructor
- */
+
+import * as bitArray  from "./bitArray.ts";
+import * as exception from "./exception.ts";
+import * as codec     from "./codec.ts";
+import { assert } from "https://deno.land/std@0.83.0/testing/asserts.ts";
+
 export default class SHA1{
-  constructor(hash?:SHA1){
+  /**
+   * Context for a SHA-1 operation in progress.
+   * @constructor
+   */
+  constructor(hash?:SHA1) {
     if (hash) {
-      this._h = hash._h.slice(0);
-      this._buffer = hash._buffer.slice(0);
+      this._h = Uint32Array.from([...hash._h]);
+      this._buffer = Uint32Array.from([...hash._buffer]);
       this._length = hash._length;
     } else {
       this.reset();
     }
+  };
+  /**
+   * Hash a string or an array of words.
+   * @static
+   * @param {Uint32Array|String} data the data to hash.
+   * @return {Uint32Array} The hash value, an array of 5 big-endian words.
+   */
+  static hash(data:Uint32Array|string):Uint32Array {
+    return (new SHA1()).update(data).finalize();
+  };
+  /**
+   * The hash's block size, in bits.
+   * @constant
+   */
+  blockSize=512
+  /**
+   * Reset the hash state.
+   * @return this
+   */
+  reset() {
+    this._h = Uint32Array.from([...this._init]);
+    this._buffer = new Uint32Array();
+    this._length = 0;
+    return this;
+  };
+  /**
+   * Input several words to the hash.
+   * @param {Uint32Array|String} data the data to hash.
+   * @return this
+   */
+  update(data:Uint32Array|string) {
+    if (typeof data === "string") {
+      data = codec.utf8String.toBits(data);
+    }
+    let i, b = this._buffer = bitArray.concat(this._buffer, data),
+        ol = this._length,
+        nl = this._length = ol + bitArray.bitLength(data);
+    if (nl > 9007199254740991){
+      throw new exception.Invalid("Cannot hash more than 2^53 - 1 bits");
+    }
+
+    var c = new Uint32Array(b);
+    var j = 0;
+    for (i = this.blockSize+ol - ((this.blockSize+ol) & (this.blockSize-1)); i <= nl;i+= this.blockSize) {
+      this._block(c.subarray(16 * j, 16 * (j+1)));
+      j += 1;
+    }
+    b = Uint32Array.from([...b].splice(16*j))
+    
+    return this;
   }
-  private _h:      number[] = [];
-  private _buffer: number[] = [];
-  private _length: number   =  0;
+  /**
+   * Complete hashing and output the hash value.
+   * @return {Uint32Array} The hash value, an array of 5 big-endian words. TODO
+   */
+  finalize() {
+    var i, b = this._buffer, h = this._h;
+
+    // Round out and push the buffer
+    b = bitArray.concat(b, Uint32Array.from([bitArray.partial(1,1)]));
+    // Round out the buffer to a multiple of 16 words, less the 2 length words.
+    for (i = b.length + 2; i & 15; i++) {
+      b=Uint32Array.from([...b,0]);
+    }
+
+    // append the length
+    b = Uint32Array.from([...b,Math.floor(this._length / 0x100000000)]);
+    b = Uint32Array.from([...b,this._length | 0]);
+
+    while (b.length) {
+      const spliced = Uint32Array.from([...b].splice(0,16));
+      b = Uint32Array.from([...b].splice(16))
+      this._block(spliced);
+    }
+
+    this.reset();
+    return h;
+  }
+
+
   /**
    * The SHA-1 initialization vector.
    * @private
    */
-  private _init = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
-  
+  private _init=Uint32Array.from([0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0])
+
+  _h = Uint32Array.from([...this._init]);
+  _buffer = new Uint32Array();
+  _length = 0;
+
   /**
    * The SHA-1 hash key.
    * @private
    */
-  private _key = [0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6];
+  private _key=Uint32Array.from([0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6])
 
   /**
    * The SHA-1 logical functions f(0), f(1), ..., f(79).
    * @private
    */
-  private _f(t:number, b:number, c:number, d:number):number {
+  private _f(t:number, b:number, c:number, d:number) {
     if (t <= 19) {
       return (b & c) | (~b & d);
     } else if (t <= 39) {
@@ -52,18 +135,25 @@ export default class SHA1{
     } else if (t <= 79) {
       return b ^ c ^ d;
     }
-    throw new Bug("Unreachable state");
+    throw new exception.Bug("Unreachable Code");
   }
 
   /**
-   * Perform one cycle of SHA-1.
-   * @param {Uint32Array|number[]} words one block of words.
+   * Circular left-shift operator.
    * @private
    */
-  private _block(words:Uint32Array|number[]):void {
-    let t, tmp, a, b, c, d, e;
-    let h = this._h;
-    let w = words;
+  private _S(n:number, x:number) {
+    return (x << n) | (x >>> 32-n);
+  }
+  
+  /**
+   * Perform one cycle of SHA-1.
+   * @param {Uint32Array} words one block of words.
+   * @private
+   */
+  private _block(w:Uint32Array){
+    var t, tmp, a, b, c, d, e,
+    h = this._h;
 
     a = h[0]; b = h[1]; c = h[2]; d = h[3]; e = h[4]; 
 
@@ -71,109 +161,25 @@ export default class SHA1{
       if (t >= 16) {
         w[t] = this._S(1, w[t-3] ^ w[t-8] ^ w[t-14] ^ w[t-16]);
       }
-      tmp = (this._S(5, a) + this._f(t, b, c, d) + e + w[t] +
-              this._key[Math.floor(t/20)]) | 0;
+      tmp = (this._S(5, a) + this._f(t, b, c, d) + e + w[t] + this._key[Math.floor(t/20)]) | 0;
       e = d;
       d = c;
       c = this._S(30, b);
       b = a;
       a = tmp;
-    }
+   }
 
-    h[0] = (h[0]+a) |0;
-    h[1] = (h[1]+b) |0;
-    h[2] = (h[2]+c) |0;
-    h[3] = (h[3]+d) |0;
-    h[4] = (h[4]+e) |0;
-  }
-
-  /**
-   * Circular left-shift operator.
-   * @private
-   */
-  private _S(n:number, x:number):number {
-    return (x << n) | (x >>> 32-n);
-  }
-
-  /**
-   * Hash a string or an array of words.
-   * @static
-   * @param {boolean[]|String} data the data to hash.
-   * @return {boolean[]} The hash value, an array of 5 big-endian words.
-   */
-  static hash(data:boolean[]|string) {
-    return new this().update(data).finalize();
-  };
-  /**
-   * Reset the hash state.
-   * @return this
-   */
-  reset() {
-    this._h = this._init.slice(0);
-    this._buffer = [];
-    this._length = 0;
-    return this;
-  }
-  /**
-   * The hash's block size, in bits.
-   * @constant
-   */
-  blockSize=512
-  /**
-   * Input several words to the hash.
-   * @param {boolean[]|String} data the data to hash.
-   * @return this
-   */
-  update(data: boolean[]|string){
-    if (typeof data === "string") {
-      data = codec.utf8String.toBits(data);
-    }
-    var i, b = this._buffer = bitArray.concat(this._buffer.map((o)=>!!o), data).map((o)=>o?1:0),
-        ol = this._length,
-        nl = this._length = ol + bitArray.bitLength(data);
-    if (nl > 9007199254740991){
-      throw new Invalid("Cannot hash more than 2^53 - 1 bits");
-    }
-
-    if (typeof Uint32Array !== 'undefined') {
-      var c = new Uint32Array(b);
-      var j = 0;
-      for (i = this.blockSize+ol - ((this.blockSize+ol) & (this.blockSize-1)); i <= nl; i+= this.blockSize) {
-        this._block(c.subarray(16 * j, 16 * (j+1)));
-        j += 1;
-      }
-      b.splice(0, 16 * j);
-    } else {
-      for (i = this.blockSize+ol - ((this.blockSize+ol) & (this.blockSize-1)); i <= nl; i+= this.blockSize) {
-        this._block(b.splice(0,16));
-      }
-    }
-    return this;
-  }
-
-  /**
-   * Complete hashing and output the hash value.
-   * @return {boolean[]} The hash value, an array of 5 big-endian words. TODO
-   */
-  finalize():boolean[]{
-    var i, b = this._buffer, h = this._h;
-
-    // Round out and push the buffer
-    b = [...b, bitArray.partial(1,1)];
-    // Round out the buffer to a multiple of 16 words, less the 2 length words.
-    for (i = b.length + 2; i & 15; i++) {
-      b.push(0);
-    }
-
-    // append the length
-    b.push(Math.floor(this._length / 0x100000000));
-    b.push(this._length | 0);
-
-    while (b.length) {
-      this._block(b.splice(0,16));
-    }
-
-    this.reset();
-    return h.map((o)=>!!o);
+   h[0] = (h[0]+a) |0;
+   h[1] = (h[1]+b) |0;
+   h[2] = (h[2]+c) |0;
+   h[3] = (h[3]+d) |0;
+   h[4] = (h[4]+e) |0;
   }
 }
+   
+  
+  
+  
+  
+
+  
