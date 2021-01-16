@@ -1,6 +1,5 @@
-/** @fileOverview Typescript cryptography implementation.
- *
- * The Stanford Javascript Crypto Library ported to Deno tooling
+/** 
+ * @fileOverview The Stanford Javascript Crypto Library ported to Deno tooling
  *
  * @author Emily Stark
  * @author Mike Hamburg
@@ -58,7 +57,7 @@ export { hash };
   
   /**
    * Exceptions.
-   * @export exceptions
+   * @export exception
    */
   import * as exception from "./src/exception.ts";
-  export { exception }
+  export { exception };
