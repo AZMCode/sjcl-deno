@@ -11,15 +11,14 @@
  * Symmetric ciphers.
  * @export cipher
  */
-import * as cipher from "./src/cipher.ts";
-export { cipher };
+export * as cipher from "./src/cipher.ts";
+
 
 /**
  * Hash functions.  Right now only SHA256 is implemented.
  * @export hash
  */
-import * as hash from "./src/hash.ts";
-export { hash };
+export * as hash from "./src/hash.ts";
 
 /**
  * Key exchange functions.  Right now only SRP is implemented.
@@ -52,12 +51,10 @@ export { hash };
    * isn't always clear which direction is encoding and which is decoding,
    * the method names are "fromBits" and "toBits".
    */
-  import * as codec from "./src/codec.ts";
-  export { codec };
+  export * as codec from "./src/codec.ts";
   
   /**
    * Exceptions.
    * @export exception
    */
-  import * as exception from "./src/exception.ts";
-  export { exception };
+  export * as exception from "./src/exception.ts";

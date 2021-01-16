@@ -15,6 +15,8 @@
  * @author Dan Boneh
  */
 
+import * as exception from "./exception.ts";
+
 /**
  * Schedule out an AES key for both encryption and decryption.  This
  * is a low-level class.  Use a cipher mode to do bulk encryption.
@@ -22,75 +24,68 @@
  * @constructor
  * @param {Array} key The key as an array of 4, 6 or 8 words.
  */
-sjcl.cipher.aes = function (key) {
-  if (!this._tables[0][0][0]) {
-    this._precompute();
-  }
-  
-  var i, j, tmp,
-    encKey, decKey,
-    sbox = this._tables[0][4], decTable = this._tables[1],
-    keyLen = key.length, rcon = 1;
-  
-  if (keyLen !== 4 && keyLen !== 6 && keyLen !== 8) {
-    throw new sjcl.exception.invalid("invalid aes key size");
-  }
-  
-  this._key = [encKey = key.slice(0), decKey = []];
-  
-  // schedule encryption keys
-  for (i = keyLen; i < 4 * keyLen + 28; i++) {
-    tmp = encKey[i-1];
+export default class AES{
+  constructor(key:Uint32Array){
+    if (!this._tables[0][0][0]) {
+      this._precompute();
+    }
     
-    // apply sbox
-    if (i%keyLen === 0 || (keyLen === 8 && i%keyLen === 4)) {
-      tmp = sbox[tmp>>>24]<<24 ^ sbox[tmp>>16&255]<<16 ^ sbox[tmp>>8&255]<<8 ^ sbox[tmp&255];
+    var i, j, tmp,
+      encKey, decKey,
+      sbox = this._tables[0][4], decTable = this._tables[1],
+      keyLen = key.length, rcon = 1;
+    
+    if (keyLen !== 4 && keyLen !== 6 && keyLen !== 8) {
+      throw new exception.Invalid("invalid aes key size");
+    }
+    
+    this._key = [encKey = key.slice(0), decKey = new Uint32Array];
+    
+    // schedule encryption keys
+    for (i = keyLen; i < 4 * keyLen + 28; i++) {
+      tmp = encKey[i-1];
       
-      // shift rows and add rcon
-      if (i%keyLen === 0) {
-        tmp = tmp<<8 ^ tmp>>>24 ^ rcon<<24;
-        rcon = rcon<<1 ^ (rcon>>7)*283;
+      // apply sbox
+      if (i%keyLen === 0 || (keyLen === 8 && i%keyLen === 4)) {
+        tmp = sbox[tmp>>>24]<<24 ^ sbox[tmp>>16&255]<<16 ^ sbox[tmp>>8&255]<<8 ^ sbox[tmp&255];
+        
+        // shift rows and add rcon
+        if (i%keyLen === 0) {
+          tmp = tmp<<8 ^ tmp>>>24 ^ rcon<<24;
+          rcon = rcon<<1 ^ (rcon>>7)*283;
+        }
+      }
+      
+      encKey[i] = encKey[i-keyLen] ^ tmp;
+    }
+    
+    // schedule decryption keys
+    for (j = 0; i; j++, i--) {
+      tmp = encKey[j&3 ? i : i - 4];
+      if (i<=4 || j<4) {
+        decKey[j] = tmp;
+      } else {
+        decKey[j] = decTable[0][sbox[tmp>>>24      ]] ^
+                    decTable[1][sbox[tmp>>16  & 255]] ^
+                    decTable[2][sbox[tmp>>8   & 255]] ^
+                    decTable[3][sbox[tmp      & 255]];
       }
     }
-    
-    encKey[i] = encKey[i-keyLen] ^ tmp;
   }
-  
-  // schedule decryption keys
-  for (j = 0; i; j++, i--) {
-    tmp = encKey[j&3 ? i : i - 4];
-    if (i<=4 || j<4) {
-      decKey[j] = tmp;
-    } else {
-      decKey[j] = decTable[0][sbox[tmp>>>24      ]] ^
-                  decTable[1][sbox[tmp>>16  & 255]] ^
-                  decTable[2][sbox[tmp>>8   & 255]] ^
-                  decTable[3][sbox[tmp      & 255]];
-    }
-  }
-};
-
-sjcl.cipher.aes.prototype = {
-  // public
-  /* Something like this might appear here eventually
-  name: "AES",
-  blockSize: 4,
-  keySizes: [4,6,8],
-  */
-  
+  _key:Uint32Array[];
   /**
    * Encrypt an array of 4 big-endian words.
    * @param {Array} data The plaintext.
    * @return {Array} The ciphertext.
    */
-  encrypt:function (data) { return this._crypt(data,0); },
+  encrypt(data:Uint32Array){ return this._crypt(data,false); }
   
   /**
    * Decrypt an array of 4 big-endian words.
    * @param {Array} data The ciphertext.
    * @return {Array} The plaintext.
    */
-  decrypt:function (data) { return this._crypt(data,1); },
+  decrypt(data:Uint32Array) { return this._crypt(data,true); }
   
   /**
    * The expanded S-box and inverse S-box tables.  These will be computed
@@ -104,14 +99,14 @@ sjcl.cipher.aes.prototype = {
    *
    * @private
    */
-  _tables: [[[],[],[],[],[]],[[],[],[],[],[]]],
+  _tables:number[][][] = [[[],[],[],[],[]],[[],[],[],[],[]]]
 
   /**
    * Expand the S-box tables.
    *
    * @private
    */
-  _precompute: function () {
+  private _precompute() {
    var encTable = this._tables[0], decTable = this._tables[1],
        sbox = encTable[4], sboxInv = decTable[4],
        i, x, xInv, d=[], th=[], x2, x4, x8, s, tEnc, tDec;
@@ -138,27 +133,21 @@ sjcl.cipher.aes.prototype = {
        decTable[i][s] = tDec = tDec<<24 ^ tDec>>>8;
      }
    }
-   
-   // Compactify.  Considerable speedup on Firefox.
-   for (i = 0; i < 5; i++) {
-     encTable[i] = encTable[i].slice(0);
-     decTable[i] = decTable[i].slice(0);
-   }
-  },
+  }
   
   /**
    * Encryption and decryption core.
    * @param {Array} input Four words to be encrypted or decrypted.
-   * @param dir The direction, 0 for encrypt and 1 for decrypt.
+   * @param dir The direction, false for encrypt and true for decrypt.
    * @return {Array} The four encrypted or decrypted words.
    * @private
    */
-  _crypt:function (input, dir) {
+  private _crypt(input:Uint32Array, dir:boolean) {
     if (input.length !== 4) {
-      throw new sjcl.exception.invalid("invalid aes block size");
+      throw new exception.Invalid("invalid aes block size");
     }
     
-    var key = this._key[dir],
+    var key = dir?this._key[1]:this._key[0],
         // state variables a,b,c,d are loaded with pre-whitened data
         a = input[0]           ^ key[0],
         b = input[dir ? 3 : 1] ^ key[1],
@@ -170,7 +159,7 @@ sjcl.cipher.aes.prototype = {
         i,
         kIndex = 4,
         out = [0,0,0,0],
-        table = this._tables[dir],
+        table = dir?this._tables[1]:this._tables[0],
         
         // load up the tables
         t0    = table[0],
@@ -202,5 +191,5 @@ sjcl.cipher.aes.prototype = {
     
     return out;
   }
-};
+}
 
